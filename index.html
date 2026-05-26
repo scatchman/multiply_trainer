@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Тренажёр Умножения</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <div class="app">
+    <h1>✖️ Тренажёр Умножения</h1>
+
+    <!-- Переключатель режимов -->
+<div class="mode-switcher">
+  <button class="mode-btn active" id="btnModeRandom">🧠 Умный рандом</button>
+  <button class="mode-btn"        id="btnModeMarathon">🏁 Марафон 100</button>
+</div>
+	
+
+    <!-- Панель фильтров (заглушка, будет реализована позже) -->
+    <div class="filter-panel" id="filterPanel">
+      <!-- Фильтры будут добавлены здесь -->
+      <span class="filter-hint">🔧 Фильтры — скоро</span>
+    </div>
+
+    <!-- Основной экран задачи -->
+    <div class="card" id="taskCard">
+      <div class="example" id="exampleDisplay">
+        <span id="num1">?</span>
+        <span class="operator">×</span>
+        <span id="num2">?</span>
+        <span class="operator">=</span>
+      </div>
+
+      <input
+        type="number"
+        id="answerInput"
+        class="answer-input"
+        placeholder="Ответ"
+        min="4"
+        max="81"
+        autofocus
+      />
+
+      <button class="btn-check" id="checkBtn">Проверить</button>
+
+      <div class="feedback" id="feedback"></div>
+    </div>
+	
+	<!-- Прогресс марафона (скрыт в обычном режиме) -->
+<div class="marathon-progress" id="marathonProgress" style="display:none">
+
+  <div class="marathon-header">
+    <div class="marathon-stat">
+      <span class="marathon-num" id="marathonSolved">0</span>
+      <span class="marathon-label">решено</span>
+    </div>
+    <div class="marathon-timer" id="marathonTimer">0:00</div>
+    <div class="marathon-stat">
+      <span class="marathon-num" id="marathonLeft">100</span>
+      <span class="marathon-label">осталось</span>
+    </div>
+  </div>
+
+  <!-- Прогресс-бар -->
+  <div class="marathon-bar-wrap">
+    <div class="marathon-bar-fill" id="marathonBarFill" style="width:0%"></div>
+  </div>
+
+  <!-- Сетка 10×10 -->
+  <div class="marathon-grid" id="marathonGrid"></div>
+
+</div>
+
+
+
+    <!-- Статистика -->
+    <div class="stats" id="stats">
+      <div class="stat-item">
+        <span class="stat-value" id="statTotal">0</span>
+        <span class="stat-label">Всего</span>
+      </div>
+      <div class="stat-item correct">
+        <span class="stat-value" id="statCorrect">0</span>
+        <span class="stat-label">Верно</span>
+      </div>
+      <div class="stat-item wrong">
+        <span class="stat-value" id="statWrong">0</span>
+        <span class="stat-label">Ошибок</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-value" id="statPercent">—</span>
+        <span class="stat-label">Точность</span>
+      </div>
+    </div>
+
+    <button class="btn-reset" id="resetBtn">🔄 Начать заново</button>
+  </div>
+
+  <script src="app.js"></script>
+<div class="achievement-overlay" id="achievementOverlay" style="display:none">
+  <div class="achievement-modal" id="achievementModal">
+    <div class="achievement-tier"      id="achievementTier"></div>
+    <div class="achievement-big-emoji" id="achievementBigEmoji"></div>
+    <div class="achievement-title"     id="achievementTitle"></div>
+    <div class="achievement-message"   id="achievementMessage"></div>
+    <div class="achievement-secret">
+      <div class="secret-label">Твой секретный знак сегодня:</div>
+      <div class="secret-emoji" id="secretEmoji"></div>
+      <div class="secret-hint">Отправь его папе! 📱</div>
+    </div>
+    <button class="btn-achievement-close" id="achievementClose">
+      Продолжить тренировку!
+    </button>
+  </div>
+</div>
+</body>
+</html>

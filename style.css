@@ -466,3 +466,186 @@ h1 {
   border: 2px solid #ffc107;
   font-size: 0;            /* ← никакой цифры */
 }
+/* ===== ШАПКА ПРИЛОЖЕНИЯ ===== */
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.app-header h1 {
+  flex: 1;
+  text-align: left;
+  font-size: 1.5rem;
+}
+
+/* ===== БЕЙДЖ ПРОФИЛЯ ===== */
+.profile-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: #f5f7ff;
+  border: 2px solid #c5caee;
+  border-radius: 99px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #4a3f8f;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.profile-badge:hover {
+  background: #667eea;
+  color: white;
+  border-color: #667eea;
+}
+
+.profile-switch-icon {
+  font-size: 0.8rem;
+  opacity: 0.7;
+}
+
+/* ===== МОДАЛКА ВЫБОРА ПРОФИЛЯ ===== */
+.profile-overlay {
+  position: fixed;
+  inset: 0;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  padding: 20px;
+}
+
+.profile-modal {
+  background: white;
+  border-radius: 28px;
+  padding: 40px 32px;
+  text-align: center;
+  max-width: 380px;
+  width: 100%;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+}
+
+.profile-title {
+  font-size: 1.6rem;
+  color: #4a3f8f;
+  margin-bottom: 28px;
+}
+
+.profile-choices {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+}
+
+.profile-choice {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 24px 16px;
+  background: #f5f7ff;
+  border: 3px solid #e0e4ff;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.profile-choice:hover {
+  border-color: #667eea;
+  background: #eef0ff;
+  transform: translateY(-4px);
+  box-shadow: 0 8px 20px rgba(102,126,234,0.3);
+}
+
+.profile-emoji {
+  font-size: 3.5rem;
+  line-height: 1;
+}
+
+.profile-name {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #4a3f8f;
+}
+
+/* ===== РЕКОРД МАРАФОНА ===== */
+.marathon-record {
+  text-align: center;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #b8860b;
+  background: #fff8dc;
+  border: 2px solid #ffd700;
+  border-radius: 10px;
+  padding: 6px 12px;
+  margin-bottom: 12px;
+}
+
+.marathon-record-new {
+  animation: recordPulse 0.6s ease;
+}
+
+@keyframes recordPulse {
+  0%   { transform: scale(1);   }
+  50%  { transform: scale(1.1); }
+  100% { transform: scale(1);   }
+}
+
+/* ===== БАННЕР "МАРАФОН ЗАВЕРШЁН СЕГОДНЯ" ===== */
+.marathon-done-banner {
+  margin-top: 16px;
+  padding: 20px;
+  text-align: center;
+  background: linear-gradient(135deg, #fffbea, #fff3cd);
+  border: 2px solid #ffd700;
+  border-radius: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.marathon-done-emoji {
+  font-size: 3rem;
+  line-height: 1;
+}
+
+.marathon-done-title {
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: #b8860b;
+}
+
+.marathon-done-text {
+  font-size: 1rem;
+  color: #4a3f8f;
+  font-weight: 600;
+}
+
+.marathon-done-hint {
+  font-size: 0.85rem;
+  color: #999;
+  margin-top: 4px;
+}
+
+/* ===== КНОПКА HARD RESET (для папы) ===== */
+.btn-hard-reset {
+  margin-top: -8px;
+  padding: 6px;
+  background: transparent;
+  color: #ccc;
+  border: none;
+  font-size: 0.75rem;
+  cursor: pointer;
+  text-decoration: underline;
+  transition: color 0.2s;
+}
+
+.btn-hard-reset:hover {
+  color: #f44336;
+}

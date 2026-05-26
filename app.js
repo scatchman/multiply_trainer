@@ -112,8 +112,9 @@ class Marathon100Mode {
     this._pending  = [];
     this._solved   = [];
     this._current  = null;
-    this._started  = null;
-    this._finished = null;
+    this._finished = false;
+    this._accumulatedSeconds = 0;
+    this._sessionStart = null;
 
     for (let a = 1; a <= 10; a++)
       for (let b = 1; b <= 10; b++)
@@ -121,7 +122,15 @@ class Marathon100Mode {
   }
 
   start() {
-    if (!this._started) this._started = new Date();
+    if (this._finished) return;
+    if (!this._sessionStart) this._sessionStart = Date.now();
+  }
+
+  pause() {
+    if (this._sessionStart && !this._finished) {
+      this._accumulatedSeconds += Math.floor((Date.now() - this._sessionStart) / 1000);
+      this._sessionStart = null;
+    }
   }
 
   next() {
@@ -138,25 +147,54 @@ class Marathon100Mode {
   markSolved(example) {
     this._pending = this._pending.filter(ex => !ex.equals(example));
     this._solved.push(example);
-    if (this._pending.length === 0) this._finished = new Date();
+    if (this._pending.length === 0) {
+      this.pause();
+      this._finished = true;
+    }
   }
 
   markFailed() { /* пример остаётся в пуле */ }
 
   get solvedCount()      { return this._solved.length; }
   get pendingCount()     { return this._pending.length; }
-  get isFinished()       { return this._pending.length === 0; }
+  get isFinished()       { return this._finished; }
   get progressPercent()  { return Math.round(this._solved.length / 100 * 100); }
+  get solvedList()       { return this._solved.slice(); }
 
   get elapsedSeconds() {
-    if (!this._started) return 0;
-    return Math.floor(((this._finished ?? new Date()) - this._started) / 1000);
+    let total = this._accumulatedSeconds;
+    if (this._sessionStart && !this._finished) {
+      total += Math.floor((Date.now() - this._sessionStart) / 1000);
+    }
+    return total;
   }
 
   get elapsedFormatted() {
     const m = Math.floor(this.elapsedSeconds / 60);
     const s = this.elapsedSeconds % 60;
     return `${m}:${s.toString().padStart(2, '0')}`;
+  }
+
+  toJSON() {
+    return {
+      solved: this._solved.map(ex => [ex.a, ex.b]),
+      accumulatedSeconds: this.elapsedSeconds,
+      finished: this._finished,
+    };
+  }
+
+  static fromJSON(data) {
+    const m = new Marathon100Mode();
+    if (!data) return m;
+
+    m._solved = (data.solved || []).map(([a, b]) => new Example(a, b));
+    m._pending = m._pending.filter(ex =>
+      !m._solved.some(s => s.equals(ex))
+    );
+    m._accumulatedSeconds = data.accumulatedSeconds || 0;
+    m._finished = !!data.finished;
+    m._sessionStart = null;
+    return m;
   }
 }
 
@@ -176,6 +214,20 @@ class Statistics {
     return this.total === 0
       ? null
       : Math.round((this.correct / this.total) * 100);
+  }
+
+  toJSON() {
+    return { total: this.total, correct: this.correct, wrong: this.wrong };
+  }
+
+  static fromJSON(data) {
+    const s = new Statistics();
+    if (data) {
+      s.total = data.total || 0;
+      s.correct = data.correct || 0;
+      s.wrong = data.wrong || 0;
+    }
+    return s;
   }
 }
 
@@ -229,11 +281,186 @@ class DailyAchievements {
 }
 
 // =============================================================
-// 8. ГЛАВНЫЙ КОНТРОЛЛЕР
+// 8. ИГРОВОЙ ДЕНЬ (сменяется в 3:00 ночи)
+// =============================================================
+
+class GameDay {
+  static current() {
+    const now = new Date();
+    const shifted = new Date(now.getTime() - 3 * 60 * 60 * 1000);
+    const y = shifted.getFullYear();
+    const m = String(shifted.getMonth() + 1).padStart(2, '0');
+    const d = String(shifted.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+}
+
+// =============================================================
+// 9. ХРАНИЛИЩЕ ПРОФИЛЕЙ
+// =============================================================
+
+class ProfileStorage {
+  static STORAGE_VERSION = 1;
+  static KEY_PREFIX = 'mathTrainer.profile.';
+
+  static load(profileId) {
+    try {
+      const raw = localStorage.getItem(this.KEY_PREFIX + profileId);
+      if (!raw) return null;
+      const data = JSON.parse(raw);
+      if (data.version !== this.STORAGE_VERSION) {
+        console.warn(`Profile ${profileId}: version mismatch, ignoring`);
+        return null;
+      }
+      return data;
+    } catch (e) {
+      console.error('ProfileStorage.load error:', e);
+      return null;
+    }
+  }
+
+  static save(profileId, data) {
+    try {
+      const payload = { version: this.STORAGE_VERSION, ...data };
+      localStorage.setItem(this.KEY_PREFIX + profileId, JSON.stringify(payload));
+    } catch (e) {
+      console.error('ProfileStorage.save error:', e);
+    }
+  }
+
+  static clear(profileId) {
+    localStorage.removeItem(this.KEY_PREFIX + profileId);
+  }
+}
+
+// =============================================================
+// 10. МЕНЕДЖЕР ПРОФИЛЯ
+// =============================================================
+
+class ProfileManager {
+  constructor(profileId) {
+    this.profileId = profileId; // 'daughter' | 'dad'
+    this.gameDay = GameDay.current();
+    this.stats = new Statistics();
+    this.marathon = new Marathon100Mode();
+    this.achievementShown = false;
+    this.currentMode = 'random';
+    this.bestMarathonSeconds = null; // личный рекорд (переживает смену дня)
+
+    this._loadOrInit();
+  }
+
+  _loadOrInit() {
+    const data = ProfileStorage.load(this.profileId);
+
+    // Рекорд переживает смену дня и hard reset? — НЕТ, только смену дня.
+    if (data && typeof data.bestMarathonSeconds === 'number') {
+      this.bestMarathonSeconds = data.bestMarathonSeconds;
+    }
+
+    // Если данных нет или день сменился — стартуем с чистого листа (кроме рекорда)
+    if (!data || data.gameDay !== this.gameDay) {
+      this.stats = new Statistics();
+      this.marathon = new Marathon100Mode();
+      this.achievementShown = false;
+      this.currentMode = 'random';
+      this.save();
+      return;
+    }
+
+    // Восстанавливаем дневное состояние
+    this.stats = Statistics.fromJSON(data.stats);
+    this.marathon = Marathon100Mode.fromJSON(data.marathon);
+    this.achievementShown = !!data.achievementShown;
+    this.currentMode = data.currentMode || 'random';
+  }
+
+  save() {
+    ProfileStorage.save(this.profileId, {
+      gameDay: this.gameDay,
+      stats: this.stats.toJSON(),
+      marathon: this.marathon.toJSON(),
+      achievementShown: this.achievementShown,
+      currentMode: this.currentMode,
+      bestMarathonSeconds: this.bestMarathonSeconds,
+    });
+  }
+
+  /** Проверка смены дня. Возвращает true если день сменился. */
+  checkDayRollover() {
+    const today = GameDay.current();
+    if (today !== this.gameDay) {
+      this.gameDay = today;
+      this.stats = new Statistics();
+      this.marathon = new Marathon100Mode();
+      this.achievementShown = false;
+      this.currentMode = 'random';
+      this.save();
+      return true;
+    }
+    return false;
+  }
+
+  /** Обновить рекорд если текущее время лучше. Возвращает true если рекорд побит. */
+  updateRecord() {
+    if (!this.marathon.isFinished) return false;
+    const t = this.marathon.elapsedSeconds;
+    if (this.bestMarathonSeconds === null || t < this.bestMarathonSeconds) {
+      this.bestMarathonSeconds = t;
+      this.save();
+      return true;
+    }
+    return false;
+  }
+
+  /** Полный сброс профиля (включая рекорд) */
+  hardReset() {
+    ProfileStorage.clear(this.profileId);
+    this.gameDay = GameDay.current();
+    this.stats = new Statistics();
+    this.marathon = new Marathon100Mode();
+    this.achievementShown = false;
+    this.currentMode = 'random';
+    this.bestMarathonSeconds = null;
+    this.save();
+  }
+
+  static formatTime(seconds) {
+    if (seconds === null || seconds === undefined) return '—';
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  }
+}
+
+// =============================================================
+// 11. ЭКРАН ВЫБОРА ПРОФИЛЯ
+// =============================================================
+
+class ProfileSelector {
+  static show(onSelect) {
+    const overlay = document.getElementById('profileOverlay');
+    overlay.style.display = 'flex';
+
+    document.querySelectorAll('.profile-choice').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.profile;
+        overlay.style.display = 'none';
+        document.getElementById('mainApp').style.display = '';
+        onSelect(id);
+      }, { once: true });
+    });
+  }
+}
+
+// =============================================================
+// 12. ГЛАВНЫЙ КОНТРОЛЛЕР
 // =============================================================
 
 class App {
-  constructor() {
+  constructor(profileId) {
+    this.profile = new ProfileManager(profileId);
+
     // Умный рандом
     this.pool = new ExamplePool({ minFactor: 2, maxFactor: 9 });
     this.validators = new ValidatorManager()
@@ -244,25 +471,16 @@ class App {
       .add(new NoRecentRepeatValidator(8),   'noRecentRepeat');
     this.smartMode = new SmartRandomMode(this.validators, 100);
 
-    // Марафон
-    this.marathonMode = new Marathon100Mode();
+    this.achievements = new DailyAchievements();
 
-    // Текущий режим: 'random' | 'marathon'
-    this.currentMode = 'random';
+    this.currentMode = this.profile.currentMode;
     this._timerInterval = null;
-
-    // Статистика и ачивки
-    this.stats            = new Statistics();
-    this.achievements     = new DailyAchievements();
-    this.achievementShown = false;
-
-    // Состояние
     this.history  = [];
     this.current  = null;
     this.answered = false;
 
     this._bindUI();
-    this._nextExample();
+    this._initFromProfile();
   }
 
   // -----------------------------------------------------------
@@ -281,6 +499,14 @@ class App {
       statCorrect: document.getElementById('statCorrect'),
       statWrong:   document.getElementById('statWrong'),
       statPercent: document.getElementById('statPercent'),
+      profileBadge:    document.getElementById('profileBadge'),
+      switchProfileBtn:document.getElementById('switchProfileBtn'),
+      hardResetBtn:    document.getElementById('hardResetBtn'),
+      marathonRecord:  document.getElementById('marathonRecord'),
+      marathonRecordValue: document.getElementById('marathonRecordValue'),
+      marathonDoneBanner:  document.getElementById('marathonDoneBanner'),
+      marathonDoneText:    document.getElementById('marathonDoneText'),
+      taskCard:        document.getElementById('taskCard'),
     };
 
     this.ui.checkBtn.addEventListener('click', () => this._onCheck());
@@ -293,15 +519,92 @@ class App {
       }
     });
 
-    // Переключатель режимов
     document.getElementById('btnModeRandom')
       .addEventListener('click', () => this._switchMode('random'));
     document.getElementById('btnModeMarathon')
       .addEventListener('click', () => this._switchMode('marathon'));
 
-    // Закрытие ачивки
     document.getElementById('achievementClose')
       .addEventListener('click', () => this._closeAchievement());
+
+    if (this.ui.switchProfileBtn) {
+      this.ui.switchProfileBtn.addEventListener('click', () => {
+        this._pauseAndSave();
+        location.reload();
+      });
+    }
+
+    if (this.ui.hardResetBtn) {
+      this.ui.hardResetBtn.addEventListener('click', () => this._onHardReset());
+    }
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        const rolled = this.profile.checkDayRollover();
+        if (rolled) {
+          location.reload();
+          return;
+        }
+        if (this.currentMode === 'marathon' && !this.profile.marathon.isFinished) {
+          this.profile.marathon.start();
+        }
+      } else {
+        this._pauseAndSave();
+      }
+    });
+
+    window.addEventListener('beforeunload', () => this._pauseAndSave());
+  }
+
+  // -----------------------------------------------------------
+  // Инициализация из профиля
+  // -----------------------------------------------------------
+  _initFromProfile() {
+    if (this.ui.profileBadge) {
+      this.ui.profileBadge.textContent =
+        this.profile.profileId === 'daughter' ? '👧 Дочка' : '👨 Папа';
+    }
+
+    if (this.ui.hardResetBtn) {
+      this.ui.hardResetBtn.style.display =
+        this.profile.profileId === 'dad' ? 'block' : 'none';
+    }
+
+    document.getElementById('btnModeRandom')
+      .classList.toggle('active', this.currentMode === 'random');
+    document.getElementById('btnModeMarathon')
+      .classList.toggle('active', this.currentMode === 'marathon');
+    document.getElementById('marathonProgress').style.display =
+      this.currentMode === 'marathon' ? 'block' : 'none';
+
+    this._updateStatsVisibility();
+	this._updateStats();
+    this._updateRecordBadge();
+
+    if (this.currentMode === 'marathon') {
+      this._buildMarathonGrid();
+      this._restoreMarathonGridState();
+      this._updateMarathonProgress();
+
+      if (this.profile.marathon.isFinished) {
+        this._showMarathonFinishedToday();
+      } else {
+        this.profile.marathon.start();
+        this._startMarathonTimer();
+        this._nextExample();
+      }
+    } else {
+      this._nextExample();
+    }
+  }
+
+  // -----------------------------------------------------------
+  // Сохранение / пауза
+  // -----------------------------------------------------------
+  _pauseAndSave() {
+    this.profile.marathon.pause();
+    this.profile.currentMode = this.currentMode;
+    this.profile.save();
   }
 
   // -----------------------------------------------------------
@@ -309,31 +612,44 @@ class App {
   // -----------------------------------------------------------
   _switchMode(mode) {
     if (this.currentMode === mode) return;
+
+    this._pauseAndSave();
+    this._stopMarathonTimer();
+
     this.currentMode = mode;
+    this.profile.currentMode = mode;
 
     document.getElementById('btnModeRandom')
       .classList.toggle('active', mode === 'random');
     document.getElementById('btnModeMarathon')
       .classList.toggle('active', mode === 'marathon');
-
     document.getElementById('marathonProgress').style.display =
       mode === 'marathon' ? 'block' : 'none';
 
-    // Сброс
-    this.stats.reset();
-    this.history          = [];
-    this.current          = null;
-    this.achievementShown = false;
-    this._updateStats();
-    this._stopMarathonTimer();
+    this._updateStatsVisibility();
+	
+	this.history = [];
+    this.current = null;
 
     if (mode === 'marathon') {
-      this.marathonMode.reset();
       this._buildMarathonGrid();
-      this.marathonMode.start();
+      this._restoreMarathonGridState();
+      this._updateMarathonProgress();
+      this._updateRecordBadge();
+
+      if (this.profile.marathon.isFinished) {
+        this._showMarathonFinishedToday();
+        this.profile.save();
+        return;
+      }
+
+      this.profile.marathon.start();
       this._startMarathonTimer();
+    } else {
+      this._hideMarathonFinishedToday();
     }
 
+    this.profile.save();
     this._nextExample();
   }
 
@@ -344,7 +660,11 @@ class App {
     this.answered = false;
 
     if (this.currentMode === 'marathon') {
-      this.current = this.marathonMode.next();
+      if (this.profile.marathon.isFinished) {
+        this._showMarathonFinishedToday();
+        return;
+      }
+      this.current = this.profile.marathon.next();
       if (this.current) this._updateMarathonGrid(this.current, null);
     } else {
       const context = { previous: this.current, history: this.history };
@@ -392,61 +712,109 @@ class App {
     this.answered = true;
     this.history.push(this.current);
 
-    if (answer === this.current.result) {
-      this.stats.recordCorrect();
+    const isCorrect = (answer === this.current.result);
+
+    if (isCorrect) {
+      // Статистику ведём ТОЛЬКО в умном рандоме
+      if (this.currentMode === 'random') {
+        this.profile.stats.recordCorrect();
+      }
+
       this.ui.input.classList.add('correct');
       this.ui.feedback.textContent = this._randomCorrectPhrase();
       this.ui.feedback.className   = 'feedback correct';
 
       if (this.currentMode === 'marathon') {
         const solved = this.current;
-        this.marathonMode.markSolved(solved);
+        this.profile.marathon.markSolved(solved);
         this._updateMarathonProgress();
         this._updateMarathonGrid(null, solved);
 
-        if (this.marathonMode.isFinished) {
+        if (this.profile.marathon.isFinished) {
           this._stopMarathonTimer();
-          setTimeout(() => this._showMarathonFinish(), 600);
+          const isNewRecord = this.profile.updateRecord();
+          this.profile.save();
+          this._updateRecordBadge(isNewRecord);
+          setTimeout(() => this._showMarathonFinish(isNewRecord), 600);
           return;
         }
       }
 
     } else {
-      this.stats.recordWrong();
+      // Статистику ведём ТОЛЬКО в умном рандоме
+      if (this.currentMode === 'random') {
+        this.profile.stats.recordWrong();
+      }
+
       this.ui.input.classList.add('wrong');
       this.ui.feedback.textContent =
         `Неверно. ${this.current.a} × ${this.current.b} = ${this.current.result}`;
       this.ui.feedback.className = 'feedback wrong';
 
       if (this.currentMode === 'marathon') {
-        this.marathonMode.markFailed();
+        this.profile.marathon.markFailed();
       }
     }
 
     this.ui.checkBtn.textContent = 'Дальше →';
-    this._updateStats();
-    this._checkAndShowAchievement();
+
+    // Обновляем статы и проверяем ачивки ТОЛЬКО в умном рандоме
+    if (this.currentMode === 'random') {
+      this._updateStats();
+      this._checkAndShowAchievement();
+    }
+
+    this.profile.save();
   }
 
-  // -----------------------------------------------------------
-  // Сброс
+    // -----------------------------------------------------------
+  // Сброс прогресса ТЕКУЩЕГО режима (кнопка "Начать заново")
   // -----------------------------------------------------------
   _onReset() {
-    this.stats.reset();
-    this.history          = [];
-    this.current          = null;
-    this.achievementShown = false;
-    this._stopMarathonTimer();
+    this.history = [];
+    this.current = null;
 
-    if (this.currentMode === 'marathon') {
-      this.marathonMode.reset();
+    if (this.currentMode === 'random') {
+      // Сбрасываем только статистику умного рандома и флаг ачивки
+      this.profile.stats.reset();
+      this.profile.achievementShown = false;
+      this._updateStats();
+
+    } else if (this.currentMode === 'marathon') {
+      // Сбрасываем только марафон, статистику умного рандома не трогаем
+      this._stopMarathonTimer();
+      this.profile.marathon.reset();
+      this._hideMarathonFinishedToday();
       this._buildMarathonGrid();
       this._updateMarathonProgress();
-      this.marathonMode.start();
+      this.profile.marathon.start();
       this._startMarathonTimer();
     }
 
+    this.profile.save();
+    this._nextExample();
+  }
+
+  // -----------------------------------------------------------
+  // Hard reset (только папа) — обнулить ВСЁ включая рекорд
+  // -----------------------------------------------------------
+  _onHardReset() {
+    if (!confirm('Полностью обнулить прогресс этого профиля?\n(Включая личный рекорд)')) return;
+
+    this.profile.hardReset();
+    this._stopMarathonTimer();
+    this.history = [];
+    this.current = null;
+    this.currentMode = 'random';
+
+    document.getElementById('btnModeRandom').classList.add('active');
+    document.getElementById('btnModeMarathon').classList.remove('active');
+    document.getElementById('marathonProgress').style.display = 'none';
+    this._updateStatsVisibility();
+	this._hideMarathonFinishedToday();
+
     this._updateStats();
+    this._updateRecordBadge();
     this._nextExample();
   }
 
@@ -454,22 +822,73 @@ class App {
   // Статистика
   // -----------------------------------------------------------
   _updateStats() {
-    this.ui.statTotal.textContent   = this.stats.total;
-    this.ui.statCorrect.textContent = this.stats.correct;
-    this.ui.statWrong.textContent   = this.stats.wrong;
+    const s = this.profile.stats;
+    this.ui.statTotal.textContent   = s.total;
+    this.ui.statCorrect.textContent = s.correct;
+    this.ui.statWrong.textContent   = s.wrong;
     this.ui.statPercent.textContent =
-      this.stats.accuracy !== null ? `${this.stats.accuracy}%` : '—';
+      s.accuracy !== null ? `${s.accuracy}%` : '—';
+  }
+  
+   _updateStatsVisibility() {
+    const statsEl = document.getElementById('stats');
+    if (statsEl) {
+      statsEl.style.display = (this.currentMode === 'random') ? '' : 'none';
+    }
+  }
+
+  // -----------------------------------------------------------
+  // Бейдж рекорда
+  // -----------------------------------------------------------
+  _updateRecordBadge(isNew = false) {
+    if (!this.ui.marathonRecord) return;
+    const best = this.profile.bestMarathonSeconds;
+    if (best === null) {
+      this.ui.marathonRecord.style.display = 'none';
+      return;
+    }
+    this.ui.marathonRecord.style.display = 'block';
+    this.ui.marathonRecordValue.textContent = ProfileManager.formatTime(best);
+    if (isNew) {
+      this.ui.marathonRecord.classList.add('marathon-record-new');
+      setTimeout(() => {
+        this.ui.marathonRecord.classList.remove('marathon-record-new');
+      }, 1500);
+    }
+  }
+
+  // -----------------------------------------------------------
+  // Баннер "марафон сегодня завершён"
+  // -----------------------------------------------------------
+  _showMarathonFinishedToday() {
+    this._stopMarathonTimer();
+    if (this.ui.marathonDoneBanner) {
+      this.ui.marathonDoneBanner.style.display = 'flex';
+      this.ui.marathonDoneText.textContent =
+        `⏱ Время: ${this.profile.marathon.elapsedFormatted}`;
+    }
+    // Прячем карточку с примером и кнопкой
+    if (this.ui.taskCard) this.ui.taskCard.style.display = 'none';
+  }
+
+  _hideMarathonFinishedToday() {
+    if (this.ui.marathonDoneBanner) {
+      this.ui.marathonDoneBanner.style.display = 'none';
+    }
+    if (this.ui.taskCard) this.ui.taskCard.style.display = '';
   }
 
   // -----------------------------------------------------------
   // Ачивки
   // -----------------------------------------------------------
   _checkAndShowAchievement() {
-    if (this.achievementShown) return;
-    const level = this.achievements.checkAchievement(this.stats);
+    if (this.profile.achievementShown) return;
+    const level = this.achievements.checkAchievement(this.profile.stats);
     if (!level) return;
 
-    this.achievementShown = true;
+    this.profile.achievementShown = true;
+    this.profile.save();
+
     const data = this.achievements.getRewardData(level);
     this._showAchievementModal({
       tier:    data.tier,
@@ -482,16 +901,25 @@ class App {
     });
   }
 
-  _showMarathonFinish() {
+  _showMarathonFinish(isNewRecord) {
+    const recordLine = isNewRecord ? '\n🏅 НОВЫЙ РЕКОРД!' : '';
     this._showAchievementModal({
       tier:    'gold',
       topText: '🏁 Марафон завершён!',
       bigEmoji: '🎓',
       title:   'Все 100 примеров решены!',
-      message: `⏱ Время: ${this.marathonMode.elapsedFormatted}\n❌ Ошибок: ${this.stats.wrong}\n🎯 Точность: ${this.stats.accuracy}%`,
+      message: `⏱ Время: ${this.profile.marathon.elapsedFormatted}\n❌ Ошибок: ${this.profile.stats.wrong}\n🎯 Точность: ${this.profile.stats.accuracy}%${recordLine}`,
       secret:  this.achievements.getPerfectEmoji(),
       hint:    'Отправь папе результат! 📱',
     });
+
+    // После закрытия ачивки — показать баннер "завершено сегодня"
+    const closeBtn = document.getElementById('achievementClose');
+    const handler = () => {
+      this._showMarathonFinishedToday();
+      closeBtn.removeEventListener('click', handler);
+    };
+    closeBtn.addEventListener('click', handler);
   }
 
   _showAchievementModal({ tier, topText, bigEmoji, title, message, secret, hint }) {
@@ -512,27 +940,36 @@ class App {
   // -----------------------------------------------------------
   // Марафон — сетка и прогресс
   // -----------------------------------------------------------
-	_buildMarathonGrid() {
-	  const grid = document.getElementById('marathonGrid');
-	  grid.innerHTML = '';
-	  for (let a = 1; a <= 10; a++) {
-		for (let b = 1; b <= 10; b++) {
-		  const cell = document.createElement('div');
-		  cell.className   = 'marathon-cell';
-		  cell.id          = `cell-${a}-${b}`;
-		  cell.title       = '';        // ← убираем подсказку при наведении
-		  cell.textContent = '';        // ← никаких цифр
-		  grid.appendChild(cell);
-		}
-	  }
-	}
+  _buildMarathonGrid() {
+    const grid = document.getElementById('marathonGrid');
+    grid.innerHTML = '';
+    for (let a = 1; a <= 10; a++) {
+      for (let b = 1; b <= 10; b++) {
+        const cell = document.createElement('div');
+        cell.className   = 'marathon-cell';
+        cell.id          = `cell-${a}-${b}`;
+        cell.title       = '';
+        cell.textContent = '';
+        grid.appendChild(cell);
+      }
+    }
+  }
+
+ /** Восстановить визуальное состояние сетки из сохранённого марафона */
+  _restoreMarathonGridState() {
+    for (const ex of this.profile.marathon.solvedList) {
+      const cell = document.getElementById(`cell-${ex.a}-${ex.b}`);
+      if (cell) {
+        cell.classList.add('solved');
+        cell.textContent = '✓';
+      }
+    }
+  }
 
   _updateMarathonGrid(current, justSolved) {
-    // Убираем current подсветку везде
     document.querySelectorAll('.marathon-cell.current')
       .forEach(c => c.classList.remove('current'));
 
-    // Подсвечиваем текущий
     if (current) {
       const cell = document.getElementById(`cell-${current.a}-${current.b}`);
       if (cell && !cell.classList.contains('solved')) {
@@ -540,7 +977,6 @@ class App {
       }
     }
 
-    // Помечаем решённый
     if (justSolved) {
       const cell = document.getElementById(`cell-${justSolved.a}-${justSolved.b}`);
       if (cell) {
@@ -552,9 +988,9 @@ class App {
   }
 
   _updateMarathonProgress() {
-    document.getElementById('marathonSolved').textContent  = this.marathonMode.solvedCount;
-    document.getElementById('marathonLeft').textContent    = this.marathonMode.pendingCount;
-    document.getElementById('marathonBarFill').style.width = `${this.marathonMode.progressPercent}%`;
+    document.getElementById('marathonSolved').textContent  = this.profile.marathon.solvedCount;
+    document.getElementById('marathonLeft').textContent    = this.profile.marathon.pendingCount;
+    document.getElementById('marathonBarFill').style.width = `${this.profile.marathon.progressPercent}%`;
   }
 
   // -----------------------------------------------------------
@@ -564,8 +1000,11 @@ class App {
     this._stopMarathonTimer();
     this._timerInterval = setInterval(() => {
       document.getElementById('marathonTimer').textContent =
-        this.marathonMode.elapsedFormatted;
+        this.profile.marathon.elapsedFormatted;
     }, 1000);
+    // Сразу обновим, чтобы не ждать секунду
+    document.getElementById('marathonTimer').textContent =
+      this.profile.marathon.elapsedFormatted;
   }
 
   _stopMarathonTimer() {
@@ -591,5 +1030,7 @@ class App {
 // ЗАПУСК
 // =============================================================
 document.addEventListener('DOMContentLoaded', () => {
-  window.app = new App();
+  ProfileSelector.show((profileId) => {
+    window.app = new App(profileId);
+  });
 });

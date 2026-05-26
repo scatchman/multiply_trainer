@@ -8,19 +8,41 @@
 </head>
 <body>
 
-  <div class="app">
-    <h1>✖️ Тренажёр Умножения</h1>
+  <!-- ===== МОДАЛКА ВЫБОРА ПРОФИЛЯ ===== -->
+  <div class="profile-overlay" id="profileOverlay">
+    <div class="profile-modal">
+      <h2 class="profile-title">Кто играет?</h2>
+      <div class="profile-choices">
+        <button class="profile-choice" data-profile="daughter">
+          <span class="profile-emoji">👧</span>
+          <span class="profile-name">Дочка</span>
+        </button>
+        <button class="profile-choice" data-profile="dad">
+          <span class="profile-emoji">👨</span>
+          <span class="profile-name">Папа</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="app" id="mainApp" style="display:none">
+    <!-- Шапка с профилем -->
+    <div class="app-header">
+      <h1>✖️ Тренажёр Умножения</h1>
+      <button class="profile-badge" id="switchProfileBtn" title="Сменить профиль">
+        <span id="profileBadge">👧 Дочка</span>
+        <span class="profile-switch-icon">⇄</span>
+      </button>
+    </div>
 
     <!-- Переключатель режимов -->
-<div class="mode-switcher">
-  <button class="mode-btn active" id="btnModeRandom">🧠 Умный рандом</button>
-  <button class="mode-btn"        id="btnModeMarathon">🏁 Марафон 100</button>
-</div>
-	
+    <div class="mode-switcher">
+      <button class="mode-btn active" id="btnModeRandom">🧠 Умный рандом</button>
+      <button class="mode-btn"        id="btnModeMarathon">🏁 Марафон 100</button>
+    </div>
 
-    <!-- Панель фильтров (заглушка, будет реализована позже) -->
+    <!-- Панель фильтров -->
     <div class="filter-panel" id="filterPanel">
-      <!-- Фильтры будут добавлены здесь -->
       <span class="filter-hint">🔧 Фильтры — скоро</span>
     </div>
 
@@ -38,8 +60,8 @@
         id="answerInput"
         class="answer-input"
         placeholder="Ответ"
-        min="4"
-        max="81"
+        min="1"
+        max="100"
         autofocus
       />
 
@@ -47,33 +69,41 @@
 
       <div class="feedback" id="feedback"></div>
     </div>
-	
-	<!-- Прогресс марафона (скрыт в обычном режиме) -->
-<div class="marathon-progress" id="marathonProgress" style="display:none">
 
-  <div class="marathon-header">
-    <div class="marathon-stat">
-      <span class="marathon-num" id="marathonSolved">0</span>
-      <span class="marathon-label">решено</span>
+    <!-- Прогресс марафона -->
+    <div class="marathon-progress" id="marathonProgress" style="display:none">
+
+      <!-- Бейдж рекорда -->
+      <div class="marathon-record" id="marathonRecord" style="display:none">
+        🏅 Рекорд: <span id="marathonRecordValue">—</span>
+      </div>
+
+      <div class="marathon-header">
+        <div class="marathon-stat">
+          <span class="marathon-num" id="marathonSolved">0</span>
+          <span class="marathon-label">решено</span>
+        </div>
+        <div class="marathon-timer" id="marathonTimer">0:00</div>
+        <div class="marathon-stat">
+          <span class="marathon-num" id="marathonLeft">100</span>
+          <span class="marathon-label">осталось</span>
+        </div>
+      </div>
+
+      <div class="marathon-bar-wrap">
+        <div class="marathon-bar-fill" id="marathonBarFill" style="width:0%"></div>
+      </div>
+
+      <div class="marathon-grid" id="marathonGrid"></div>
+
+      <!-- Баннер "марафон сегодня завершён" -->
+      <div class="marathon-done-banner" id="marathonDoneBanner" style="display:none">
+        <div class="marathon-done-emoji">🏆</div>
+        <div class="marathon-done-title">Марафон сегодня завершён!</div>
+        <div class="marathon-done-text" id="marathonDoneText">Время: —</div>
+        <div class="marathon-done-hint">Новый забег откроется завтра 🌅</div>
+      </div>
     </div>
-    <div class="marathon-timer" id="marathonTimer">0:00</div>
-    <div class="marathon-stat">
-      <span class="marathon-num" id="marathonLeft">100</span>
-      <span class="marathon-label">осталось</span>
-    </div>
-  </div>
-
-  <!-- Прогресс-бар -->
-  <div class="marathon-bar-wrap">
-    <div class="marathon-bar-fill" id="marathonBarFill" style="width:0%"></div>
-  </div>
-
-  <!-- Сетка 10×10 -->
-  <div class="marathon-grid" id="marathonGrid"></div>
-
-</div>
-
-
 
     <!-- Статистика -->
     <div class="stats" id="stats">
@@ -96,24 +126,31 @@
     </div>
 
     <button class="btn-reset" id="resetBtn">🔄 Начать заново</button>
+
+    <!-- Кнопка hard reset (только для папы) -->
+    <button class="btn-hard-reset" id="hardResetBtn" style="display:none">
+      обнулить весь прогресс профиля
+    </button>
+  </div>
+
+  <!-- ===== АЧИВКА ===== -->
+  <div class="achievement-overlay" id="achievementOverlay" style="display:none">
+    <div class="achievement-modal" id="achievementModal">
+      <div class="achievement-tier"      id="achievementTier"></div>
+      <div class="achievement-big-emoji" id="achievementBigEmoji"></div>
+      <div class="achievement-title"     id="achievementTitle"></div>
+      <div class="achievement-message"   id="achievementMessage"></div>
+      <div class="achievement-secret">
+        <div class="secret-label">Твой секретный знак сегодня:</div>
+        <div class="secret-emoji" id="secretEmoji"></div>
+        <div class="secret-hint">Отправь его папе! 📱</div>
+      </div>
+      <button class="btn-achievement-close" id="achievementClose">
+        Продолжить тренировку!
+      </button>
+    </div>
   </div>
 
   <script src="app.js"></script>
-<div class="achievement-overlay" id="achievementOverlay" style="display:none">
-  <div class="achievement-modal" id="achievementModal">
-    <div class="achievement-tier"      id="achievementTier"></div>
-    <div class="achievement-big-emoji" id="achievementBigEmoji"></div>
-    <div class="achievement-title"     id="achievementTitle"></div>
-    <div class="achievement-message"   id="achievementMessage"></div>
-    <div class="achievement-secret">
-      <div class="secret-label">Твой секретный знак сегодня:</div>
-      <div class="secret-emoji" id="secretEmoji"></div>
-      <div class="secret-hint">Отправь его папе! 📱</div>
-    </div>
-    <button class="btn-achievement-close" id="achievementClose">
-      Продолжить тренировку!
-    </button>
-  </div>
-</div>
 </body>
 </html>
